@@ -11,8 +11,7 @@
             <span class="name">{{ nameMap[item.ticker] || '' }}</span>
           </div>
           <div class="reg-meta">
-            <span>{{ item.quantity }}주</span>
-            <span>{{ item.buy_price.toLocaleString() }}원</span>
+            <span v-if="item.buy_price !== null">{{ item.buy_price.toLocaleString() }}원</span>
             <button class="btn-delete" @click="remove(item.ticker)">삭제</button>
           </div>
         </div>
@@ -89,12 +88,8 @@
         <p class="modal-name">{{ addTarget.name }}</p>
         <form @submit.prevent="confirmAdd">
           <label>
-            수량
-            <input v-model.number="addForm.quantity" type="number" min="1" required />
-          </label>
-          <label>
-            매수가
-            <input v-model.number="addForm.buy_price" type="number" step="0.01" min="0" required />
+            매수 평단 <span class="optional">(선택)</span>
+            <input v-model.number="addForm.buy_price" type="number" step="0.01" min="0" placeholder="입력하지 않아도 됩니다" />
           </label>
           <p v-if="addError" class="error">{{ addError }}</p>
           <div class="modal-actions">
@@ -117,7 +112,7 @@ const nasdaqSearch = ref('')
 const kospiSearch = ref('')
 
 const addTarget = ref(null)
-const addForm = ref({ quantity: null, buy_price: null })
+const addForm = ref({ buy_price: null })
 const addError = ref('')
 
 const nameMap = computed(() => {
@@ -161,7 +156,7 @@ async function fetchAll() {
 
 function openAddModal(stock) {
   addTarget.value = stock
-  addForm.value = { quantity: null, buy_price: null }
+  addForm.value = { buy_price: null }
   addError.value = ''
 }
 
@@ -172,7 +167,6 @@ async function confirmAdd() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ticker: addTarget.value.ticker,
-      quantity: addForm.value.quantity,
       buy_price: addForm.value.buy_price,
     }),
   })
@@ -339,6 +333,7 @@ label input {
   font-size: 0.95rem;
 }
 
+.optional { font-size: 0.78rem; color: #aaa; font-weight: 400; }
 .error { color: #c62828; font-size: 0.85rem; }
 
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }

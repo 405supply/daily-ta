@@ -32,11 +32,9 @@
           <span class="badge" :class="badgeClass(item.signal)">{{ badgeLabel(item.signal) }}</span>
         </div>
 
-        <div class="price-row">
-          <span class="label">매수가</span>
+        <div class="price-row" v-if="item.buy_price !== null">
+          <span class="label">매수 평단</span>
           <span class="price">{{ item.buy_price.toLocaleString() }}</span>
-          <span class="label">수량</span>
-          <span>{{ item.quantity }}주</span>
         </div>
 
         <!-- 로딩 상태 -->
@@ -62,7 +60,10 @@
           </div>
           <p v-else class="no-analysis">분석 기록 없음</p>
 
-          <div class="signal-text" v-if="item.signal">{{ item.signal }}</div>
+          <div v-if="item.signal" class="signal-preview" @click="openSignalModal(item)">
+            <span class="signal-summary">{{ signalSummary(item.signal) }}</span>
+            <span class="signal-more">전체 보기 →</span>
+          </div>
         </template>
 
         <div class="card-actions">
@@ -74,7 +75,18 @@
       </div>
     </div>
 
-    <!-- History modal -->
+    <!-- 분석 보고서 모달 -->
+    <div class="modal-overlay" v-if="signalModal.open" @click.self="signalModal.open = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>{{ signalModal.ticker }} 분석 보고서 <span class="modal-date">{{ signalModal.date }}</span></h3>
+          <button @click="signalModal.open = false">✕</button>
+        </div>
+        <div class="signal-full">{{ signalModal.text }}</div>
+      </div>
+    </div>
+
+    <!-- 분석 기록 모달 -->
     <div class="modal-overlay" v-if="historyTicker" @click.self="historyTicker = null">
       <div class="modal">
         <div class="modal-header">
@@ -85,14 +97,14 @@
         <p v-else-if="!historyRows.length" class="status">기록이 없습니다.</p>
         <table v-else class="history-table">
           <thead>
-            <tr><th>날짜</th><th>RSI</th><th>MACD</th><th>신호</th></tr>
+            <tr><th>날짜</th><th>RSI</th><th>MACD</th><th>의견</th></tr>
           </thead>
           <tbody>
-            <tr v-for="row in historyRows" :key="row.id">
+            <tr v-for="row in historyRows" :key="row.id" class="history-row" @click="openSignalFromHistory(row)">
               <td>{{ row.date }}</td>
               <td :class="rsiClass(row.rsi)">{{ row.rsi }}</td>
               <td :class="row.macd >= 0 ? 'pos' : 'neg'">{{ row.macd }}</td>
-              <td class="signal-cell">{{ row.signal }}</td>
+              <td class="signal-cell">{{ signalOpinion(row.signal) }}</td>
             </tr>
           </tbody>
         </table>
@@ -102,7 +114,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const confirmRef = ref(null)
@@ -115,7 +127,8 @@ const historyTicker = ref(null)
 const historyRows = ref([])
 const historyLoading = ref(false)
 
-// name lookup from both lists (fetched once)
+const signalModal = reactive({ open: false, ticker: '', date: '', text: '' })
+
 const nameMap = ref({})
 
 async function loadNameMap() {
@@ -175,6 +188,33 @@ async function openHistory(ticker) {
   historyLoading.value = false
 }
 
+function openSignalModal(item) {
+  signalModal.ticker = item.ticker
+  signalModal.date = item.analysis_date || ''
+  signalModal.text = item.signal
+  signalModal.open = true
+}
+
+function openSignalFromHistory(row) {
+  signalModal.ticker = row.ticker
+  signalModal.date = row.date
+  signalModal.text = row.signal
+  signalModal.open = true
+}
+
+// 첫 번째 비어있지 않은 줄 (투자 의견)
+function signalOpinion(signal) {
+  if (!signal) return '-'
+  return signal.split('\n').find(l => l.trim()) || '-'
+}
+
+// 카드에 표시할 요약: 첫 줄 + 두 번째 줄
+function signalSummary(signal) {
+  if (!signal) return ''
+  const lines = signal.split('\n').filter(l => l.trim())
+  return lines.slice(0, 2).join(' · ')
+}
+
 function rsiClass(rsi) {
   if (rsi === null) return ''
   if (rsi >= 70) return 'neg'
@@ -183,24 +223,28 @@ function rsiClass(rsi) {
 }
 
 function signalClass(signal) {
-  if (!signal) return ''
-  if (signal.includes('매수')) return 'card-buy'
-  if (signal.includes('매도')) return 'card-sell'
-  return 'card-hold'
+  const opinion = signalOpinion(signal)
+  if (opinion.includes('매수')) return 'card-buy'
+  if (opinion.includes('매도')) return 'card-sell'
+  if (opinion.includes('중립')) return 'card-hold'
+  return ''
 }
 
 function badgeClass(signal) {
-  if (!signal) return 'badge-none'
-  if (signal.includes('매수')) return 'badge-buy'
-  if (signal.includes('매도')) return 'badge-sell'
-  return 'badge-hold'
+  const opinion = signalOpinion(signal)
+  if (opinion.includes('매수')) return 'badge-buy'
+  if (opinion.includes('매도')) return 'badge-sell'
+  if (opinion.includes('중립')) return 'badge-hold'
+  return 'badge-none'
 }
 
 function badgeLabel(signal) {
   if (!signal) return '-'
-  if (signal.includes('매수')) return '매수'
-  if (signal.includes('매도')) return '매도'
-  return '관망'
+  const opinion = signalOpinion(signal)
+  for (const label of ['강력 매수', '강력 매도', '매수', '매도', '중립']) {
+    if (opinion.includes(label)) return label
+  }
+  return opinion.slice(0, 6)
 }
 
 onMounted(() => {
@@ -235,9 +279,7 @@ button {
 .btn-history { background: #eeeeee; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.card-loading {
-  opacity: 0.75;
-}
+.card-loading { opacity: 0.75; }
 
 .analyzing-overlay {
   display: flex;
@@ -299,6 +341,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-weight: 600;
   padding: 0.2rem 0.6rem;
   border-radius: 20px;
+  white-space: nowrap;
 }
 .badge-buy { background: #e3f2fd; color: #1565c0; }
 .badge-sell { background: #ffebee; color: #c62828; }
@@ -330,14 +373,35 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .no-analysis { font-size: 0.8rem; color: #bbb; margin-bottom: 0.7rem; }
 
-.signal-text {
+.signal-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  background: #f9f9f9;
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.signal-preview:hover { background: #f0f0f0; }
+
+.signal-summary {
   font-size: 0.82rem;
   color: #555;
-  background: #f9f9f9;
-  padding: 0.5rem 0.7rem;
-  border-radius: 6px;
-  margin-bottom: 0.8rem;
-  line-height: 1.5;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.signal-more {
+  font-size: 0.75rem;
+  color: #2196f3;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .card-actions { display: flex; gap: 0.5rem; }
@@ -370,10 +434,20 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-bottom: 1rem;
 }
 
+.modal-header h3 { font-size: 1rem; }
+.modal-date { font-size: 0.8rem; color: #999; font-weight: 400; margin-left: 0.5rem; }
+
 .modal-header button {
   background: none;
   font-size: 1.1rem;
   color: #666;
+}
+
+.signal-full {
+  font-size: 0.88rem;
+  color: #333;
+  line-height: 1.8;
+  white-space: pre-wrap;
 }
 
 .history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
@@ -383,5 +457,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   text-align: left;
 }
 .history-table th { background: #f5f5f5; }
-.signal-cell { font-size: 0.78rem; max-width: 280px; }
+.history-row { cursor: pointer; }
+.history-row:hover td { background: #fafafa; }
+.signal-cell { font-size: 0.82rem; }
 </style>
