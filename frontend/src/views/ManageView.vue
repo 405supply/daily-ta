@@ -21,9 +21,9 @@
     <!-- 종목 추가 패널 -->
     <div class="panels">
 
-      <!-- NASDAQ 100 -->
+      <!-- NASDAQ 200 -->
       <section class="section panel">
-        <h2>NASDAQ 100</h2>
+        <h2>NASDAQ 상위 200</h2>
         <input
           v-model="nasdaqSearch"
           class="search"
@@ -79,6 +79,30 @@
         </div>
       </section>
 
+      <!-- 직접 입력 -->
+      <section class="section panel">
+        <h2>직접 입력</h2>
+        <p class="direct-desc">목록에 없는 종목을 티커로 직접 추가합니다.</p>
+        <form class="direct-form" @submit.prevent="confirmDirectAdd">
+          <div class="direct-fields">
+            <div class="field-group">
+              <label>티커 <span class="required">*</span></label>
+              <input v-model.trim="directForm.ticker" placeholder="예) PLTR, 035420.KS" />
+            </div>
+            <div class="field-group">
+              <label>종목명 <span class="optional">(선택)</span></label>
+              <input v-model.trim="directForm.name" placeholder="예) Palantir" />
+            </div>
+            <div class="field-group">
+              <label>매수 평단 <span class="optional">(선택)</span></label>
+              <input v-model.number="directForm.buy_price" type="number" step="0.01" min="0" placeholder="0.00" />
+            </div>
+          </div>
+          <p v-if="directError" class="error">{{ directError }}</p>
+          <button type="submit" class="btn-confirm direct-submit" :disabled="!directForm.ticker">추가</button>
+        </form>
+      </section>
+
     </div>
 
     <!-- 추가 모달 -->
@@ -105,8 +129,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 
+const API = import.meta.env.VITE_API_BASE
+
 const portfolio = ref([])
-const nasdaq100 = ref([])
+const nasdaq200 = ref([])
 const kospi100 = ref([])
 const nasdaqSearch = ref('')
 const kospiSearch = ref('')
@@ -115,9 +141,12 @@ const addTarget = ref(null)
 const addForm = ref({ buy_price: null })
 const addError = ref('')
 
+const directForm = ref({ ticker: '', name: '', buy_price: null })
+const directError = ref('')
+
 const nameMap = computed(() => {
   const map = {}
-  ;[...nasdaq100.value, ...kospi100.value].forEach(s => { map[s.ticker] = s.name })
+  ;[...nasdaq200.value, ...kospi100.value].forEach(s => { map[s.ticker] = s.name })
   return map
 })
 
@@ -129,8 +158,8 @@ function isRegistered(ticker) {
 
 const filteredNasdaq = computed(() => {
   const q = nasdaqSearch.value.toLowerCase()
-  if (!q) return nasdaq100.value
-  return nasdaq100.value.filter(s =>
+  if (!q) return nasdaq200.value
+  return nasdaq200.value.filter(s =>
     s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
   )
 })
@@ -145,12 +174,12 @@ const filteredKospi = computed(() => {
 
 async function fetchAll() {
   const [p, n, k] = await Promise.all([
-    fetch('http://localhost:8000/api/portfolio').then(r => r.json()),
-    fetch('http://localhost:8000/api/stocks/nasdaq100').then(r => r.json()),
-    fetch('http://localhost:8000/api/stocks/kospi100').then(r => r.json()),
+    fetch(`${API}/api/portfolio`).then(r => r.json()),
+    fetch(`${API}/api/stocks/nasdaq200`).then(r => r.json()),
+    fetch(`${API}/api/stocks/kospi100`).then(r => r.json()),
   ])
   portfolio.value = p
-  nasdaq100.value = n
+  nasdaq200.value = n
   kospi100.value = k
 }
 
@@ -162,7 +191,7 @@ function openAddModal(stock) {
 
 async function confirmAdd() {
   addError.value = ''
-  const res = await fetch('http://localhost:8000/api/portfolio', {
+  const res = await fetch(`${API}/api/portfolio`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -179,8 +208,27 @@ async function confirmAdd() {
   }
 }
 
+async function confirmDirectAdd() {
+  directError.value = ''
+  const res = await fetch(`${API}/api/portfolio`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ticker: directForm.value.ticker.toUpperCase(),
+      buy_price: directForm.value.buy_price,
+    }),
+  })
+  if (res.ok) {
+    directForm.value = { ticker: '', name: '', buy_price: null }
+    await fetchAll()
+  } else {
+    const data = await res.json()
+    directError.value = data.detail
+  }
+}
+
 async function remove(ticker) {
-  await fetch(`http://localhost:8000/api/portfolio/${ticker}`, { method: 'DELETE' })
+  await fetch(`${API}/api/portfolio/${ticker}`, { method: 'DELETE' })
   await fetchAll()
 }
 
@@ -189,11 +237,12 @@ onMounted(fetchAll)
 
 <style scoped>
 .section {
-  background: white;
+  background: var(--surface);
   border-radius: 10px;
   padding: 1.2rem;
   margin-bottom: 1.2rem;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 4px var(--shadow);
+  transition: background 0.2s;
 }
 
 h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
@@ -211,7 +260,6 @@ h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
   vertical-align: middle;
 }
 
-/* Registered list */
 .registered-list { display: flex; flex-direction: column; gap: 0.5rem; }
 
 .reg-item {
@@ -219,11 +267,11 @@ h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
   justify-content: space-between;
   align-items: center;
   padding: 0.6rem 0.8rem;
-  background: #f9f9f9;
+  background: var(--surface-alt);
   border-radius: 6px;
 }
 
-.reg-meta { display: flex; gap: 0.8rem; align-items: center; font-size: 0.85rem; color: #555; }
+.reg-meta { display: flex; gap: 0.8rem; align-items: center; font-size: 0.85rem; color: var(--text-secondary); }
 
 .btn-delete {
   background: #ffebee;
@@ -235,14 +283,17 @@ h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
   font-size: 0.8rem;
 }
 
-/* Two-panel layout */
 .panels {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 1.2rem;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
+  .panels { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 600px) {
   .panels { grid-template-columns: 1fr; }
 }
 
@@ -251,7 +302,7 @@ h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
 .search {
   width: 100%;
   padding: 0.4rem 0.7rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border);
   border-radius: 6px;
   margin-bottom: 0.7rem;
   font-size: 0.9rem;
@@ -274,13 +325,13 @@ h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
   transition: background 0.1s;
 }
 
-.stock-item:hover { background: #f5f5f5; }
+.stock-item:hover { background: var(--hover); }
 .stock-item.registered { opacity: 0.5; }
 
 .stock-info { display: flex; flex-direction: column; gap: 0.05rem; }
 
 .ticker { font-size: 0.9rem; font-weight: 600; }
-.name { font-size: 0.78rem; color: #777; }
+.name { font-size: 0.78rem; color: var(--text-muted); }
 
 .btn-add {
   background: #e8f5e9;
@@ -293,13 +344,12 @@ h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
   white-space: nowrap;
 }
 
-.registered-label { font-size: 0.78rem; color: #aaa; }
+.registered-label { font-size: 0.78rem; color: var(--text-subtle); }
 
-/* Modal */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.4);
+  background: rgba(0,0,0,0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -307,14 +357,14 @@ h2 { font-size: 1.1rem; margin-bottom: 0.9rem; }
 }
 
 .modal {
-  background: white;
+  background: var(--surface);
   border-radius: 10px;
   padding: 1.5rem;
   width: 340px;
 }
 
 .modal h3 { font-size: 1.1rem; margin-bottom: 0.2rem; }
-.modal-name { font-size: 0.85rem; color: #777; margin-bottom: 1rem; }
+.modal-name { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem; }
 
 form { display: flex; flex-direction: column; gap: 0.8rem; }
 
@@ -323,17 +373,17 @@ label {
   flex-direction: column;
   gap: 0.3rem;
   font-size: 0.85rem;
-  color: #555;
+  color: var(--text-secondary);
 }
 
 label input {
   padding: 0.4rem 0.6rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border);
   border-radius: 6px;
   font-size: 0.95rem;
 }
 
-.optional { font-size: 0.78rem; color: #aaa; font-weight: 400; }
+.optional { font-size: 0.78rem; color: var(--text-subtle); font-weight: 400; }
 .error { color: #c62828; font-size: 0.85rem; }
 
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
@@ -344,8 +394,41 @@ label input {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
-  background: #eee;
+  background: var(--btn-secondary);
+  color: var(--text);
 }
 
 .btn-confirm { background: #4caf50; color: white; }
+
+.direct-desc { font-size: 0.82rem; color: var(--text-subtle); margin-bottom: 1rem; }
+
+.direct-form { display: flex; flex-direction: column; gap: 0.8rem; }
+
+.direct-fields { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.field-group { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.field-group label { font-size: 0.82rem; color: var(--text-secondary); }
+
+.field-group input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.required { color: #e53935; font-size: 0.75rem; }
+
+.direct-submit {
+  align-self: flex-start;
+  padding: 0.4rem 1.2rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.direct-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

@@ -43,5 +43,6 @@ def init_db():
             signal TEXT
         )
     """)
+
     con.commit()
     con.close()

@@ -1,6 +1,7 @@
 <template>
   <div>
     <ConfirmDialog ref="confirmRef" />
+    <div v-if="errorMsg" class="error-toast" @click="errorMsg = ''">{{ errorMsg }} ✕</div>
     <div class="toolbar">
       <h2>내 포트폴리오</h2>
       <div class="toolbar-actions">
@@ -32,7 +33,29 @@
           <span class="badge" :class="badgeClass(item.signal)">{{ badgeLabel(item.signal) }}</span>
         </div>
 
-        <div class="price-row" v-if="item.buy_price !== null">
+        <!-- 현재가 -->
+        <div class="price-block" v-if="prices[item.ticker]">
+          <div class="current-price-row">
+            <span class="current-price">${{ prices[item.ticker].price?.toLocaleString() }}</span>
+            <span
+              class="change-pct"
+              :class="prices[item.ticker].change_pct >= 0 ? 'pos' : 'neg'"
+            >
+              {{ prices[item.ticker].change_pct >= 0 ? '+' : '' }}{{ prices[item.ticker].change_pct }}%
+            </span>
+          </div>
+          <div class="pl-row" v-if="item.buy_price !== null">
+            <span class="label">매수가 ${{ item.buy_price.toLocaleString() }}</span>
+            <span
+              class="pl-pct"
+              :class="plPct(item) >= 0 ? 'pos' : 'neg'"
+            >
+              {{ plPct(item) >= 0 ? '+' : '' }}{{ plPct(item) }}%
+            </span>
+          </div>
+          <span class="price-time">{{ prices[item.ticker].updated_at }} 기준</span>
+        </div>
+        <div class="price-row" v-else-if="item.buy_price !== null">
           <span class="label">매수 평단</span>
           <span class="price">{{ item.buy_price.toLocaleString() }}</span>
         </div>
@@ -114,8 +137,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+
+const API = import.meta.env.VITE_API_BASE
 
 const confirmRef = ref(null)
 const items = ref([])
@@ -123,18 +148,34 @@ const loading = ref(false)
 const analyzing = ref(false)
 const analyzingTicker = ref(null)
 
+const errorMsg = ref('')
+
 const historyTicker = ref(null)
 const historyRows = ref([])
 const historyLoading = ref(false)
 
 const signalModal = reactive({ open: false, ticker: '', date: '', text: '' })
 
+const prices = ref({})
+let priceTimer = null
+
 const nameMap = ref({})
+
+async function fetchPrices() {
+  const res = await fetch(`${API}/api/prices`)
+  prices.value = await res.json()
+}
+
+function plPct(item) {
+  const p = prices.value[item.ticker]
+  if (!p?.price || !item.buy_price) return null
+  return ((p.price - item.buy_price) / item.buy_price * 100).toFixed(2)
+}
 
 async function loadNameMap() {
   const [n, k] = await Promise.all([
-    fetch('http://localhost:8000/api/stocks/nasdaq100').then(r => r.json()),
-    fetch('http://localhost:8000/api/stocks/kospi100').then(r => r.json()),
+    fetch(`${API}/api/stocks/nasdaq200`).then(r => r.json()),
+    fetch(`${API}/api/stocks/kospi100`).then(r => r.json()),
   ])
   const map = {}
   ;[...n, ...k].forEach(s => { map[s.ticker] = s.name })
@@ -147,7 +188,7 @@ function stockName(ticker) {
 
 async function load() {
   loading.value = true
-  const res = await fetch('http://localhost:8000/api/dashboard')
+  const res = await fetch(`${API}/api/dashboard`)
   items.value = await res.json()
   loading.value = false
 }
@@ -167,23 +208,34 @@ async function analyzeSingle(ticker) {
     if (!ok) return
   }
   analyzingTicker.value = ticker
-  const res = await fetch(`http://localhost:8000/api/analyze/${ticker}`)
-  if (res.ok) await load()
-  analyzingTicker.value = null
+  try {
+    const res = await fetch(`${API}/api/analyze/${ticker}`)
+    if (res.ok) await load()
+    else errorMsg.value = `${ticker} 분석 실패 (${res.status})`
+  } catch {
+    errorMsg.value = `${ticker} 분석 중 오류가 발생했습니다`
+  } finally {
+    analyzingTicker.value = null
+  }
 }
 
 async function analyzeAll() {
   analyzing.value = true
-  await fetch('http://localhost:8000/api/analyze-all')
-  await load()
-  analyzing.value = false
+  try {
+    await fetch(`${API}/api/analyze-all`)
+    await load()
+  } catch {
+    errorMsg.value = '전체 분석 중 오류가 발생했습니다'
+  } finally {
+    analyzing.value = false
+  }
 }
 
 async function openHistory(ticker) {
   historyTicker.value = ticker
   historyRows.value = []
   historyLoading.value = true
-  const res = await fetch(`http://localhost:8000/api/history/${ticker}`)
+  const res = await fetch(`${API}/api/history/${ticker}`)
   historyRows.value = await res.json()
   historyLoading.value = false
 }
@@ -250,10 +302,26 @@ function badgeLabel(signal) {
 onMounted(() => {
   loadNameMap()
   load()
+  fetchPrices()
+  priceTimer = setInterval(fetchPrices, 60_000)
+})
+
+onUnmounted(() => {
+  clearInterval(priceTimer)
 })
 </script>
 
 <style scoped>
+.error-toast {
+  background: #ffebee;
+  color: #c62828;
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -273,10 +341,10 @@ button {
   font-size: 0.85rem;
 }
 
-.btn-refresh { background: #e0e0e0; }
+.btn-refresh { background: var(--btn-secondary); color: var(--text); }
 .btn-analyze-all { background: #ff9800; color: white; }
 .btn-analyze { background: #2196f3; color: white; }
-.btn-history { background: #eeeeee; }
+.btn-history { background: var(--btn-secondary); color: var(--text); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .card-loading { opacity: 0.75; }
@@ -288,14 +356,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   justify-content: center;
   gap: 0.7rem;
   padding: 1.6rem 0;
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 
 .spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid #e0e0e0;
+  border: 3px solid var(--btn-secondary);
   border-top-color: #2196f3;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -305,7 +373,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   to { transform: rotate(360deg); }
 }
 
-.status { color: #888; padding: 2rem 0; }
+.status { color: var(--text-muted); padding: 2rem 0; }
 .empty a { color: #2196f3; }
 
 .cards {
@@ -315,11 +383,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .card {
-  background: white;
+  background: var(--surface);
   border-radius: 10px;
   padding: 1rem;
   border: 2px solid transparent;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  box-shadow: 0 1px 4px var(--shadow);
+  transition: background 0.2s, box-shadow 0.2s;
 }
 
 .card-buy { border-color: #bbdefb; }
@@ -334,7 +403,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .ticker { font-size: 1rem; font-weight: 700; }
-.name { font-size: 0.8rem; color: #666; margin-left: 0.4rem; }
+.name { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.4rem; }
 
 .badge {
   font-size: 0.75rem;
@@ -346,7 +415,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .badge-buy { background: #e3f2fd; color: #1565c0; }
 .badge-sell { background: #ffebee; color: #c62828; }
 .badge-hold { background: #fffde7; color: #f57f17; }
-.badge-none { background: #f5f5f5; color: #999; }
+.badge-none { background: var(--surface-alt2); color: var(--text-subtle); }
 
 .price-row {
   display: flex;
@@ -354,10 +423,38 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   align-items: center;
   font-size: 0.85rem;
   margin-bottom: 0.8rem;
-  color: #444;
+  color: var(--text-secondary);
 }
 
-.label { color: #999; font-size: 0.75rem; }
+.price-block { margin-bottom: 0.8rem; }
+
+.current-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.current-price {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.change-pct { font-size: 0.85rem; font-weight: 600; }
+
+.pl-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+
+.pl-pct { font-size: 0.8rem; font-weight: 600; }
+
+.price-time { font-size: 0.7rem; color: var(--text-subtle); }
+
+.label { color: var(--text-subtle); font-size: 0.75rem; }
 
 .indicators {
   display: flex;
@@ -371,25 +468,25 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .pos { color: #2e7d32; font-weight: 600; }
 .neg { color: #c62828; font-weight: 600; }
 
-.no-analysis { font-size: 0.8rem; color: #bbb; margin-bottom: 0.7rem; }
+.no-analysis { font-size: 0.8rem; color: var(--text-subtle); margin-bottom: 0.7rem; }
 
 .signal-preview {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
-  background: #f9f9f9;
+  background: var(--surface-alt);
   border-radius: 6px;
   padding: 0.5rem 0.7rem;
   margin-bottom: 0.8rem;
   cursor: pointer;
   transition: background 0.15s;
 }
-.signal-preview:hover { background: #f0f0f0; }
+.signal-preview:hover { background: var(--hover); }
 
 .signal-summary {
   font-size: 0.82rem;
-  color: #555;
+  color: var(--text-secondary);
   line-height: 1.4;
   overflow: hidden;
   display: -webkit-box;
@@ -410,7 +507,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.4);
+  background: rgba(0,0,0,0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -418,7 +515,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .modal {
-  background: white;
+  background: var(--surface);
   border-radius: 10px;
   padding: 1.5rem;
   width: 90%;
@@ -435,17 +532,17 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .modal-header h3 { font-size: 1rem; }
-.modal-date { font-size: 0.8rem; color: #999; font-weight: 400; margin-left: 0.5rem; }
+.modal-date { font-size: 0.8rem; color: var(--text-subtle); font-weight: 400; margin-left: 0.5rem; }
 
 .modal-header button {
   background: none;
   font-size: 1.1rem;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .signal-full {
   font-size: 0.88rem;
-  color: #333;
+  color: var(--text);
   line-height: 1.8;
   white-space: pre-wrap;
 }
@@ -453,11 +550,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .history-table th, .history-table td {
   padding: 0.5rem 0.7rem;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border);
   text-align: left;
 }
-.history-table th { background: #f5f5f5; }
+.history-table th { background: var(--surface-alt2); color: var(--text); }
 .history-row { cursor: pointer; }
-.history-row:hover td { background: #fafafa; }
+.history-row:hover td { background: var(--hover); }
 .signal-cell { font-size: 0.82rem; }
 </style>

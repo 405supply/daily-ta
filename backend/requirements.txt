@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+certifi
+apscheduler
+yfinance
+ta
+google-genai
+pydantic

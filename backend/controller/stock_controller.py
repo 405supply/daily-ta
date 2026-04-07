@@ -1,13 +1,13 @@
 from fastapi import APIRouter
-from static_data import NASDAQ_100, KOSPI_100
+from static_data import NASDAQ_200, KOSPI_100
 from repository import analysis_repository
 
 router = APIRouter(prefix="/api")
 
 
-@router.get("/stocks/nasdaq100")
-def get_nasdaq100():
-    return NASDAQ_100
+@router.get("/stocks/nasdaq200")
+def get_nasdaq200():
+    return NASDAQ_200
 
 
 @router.get("/stocks/kospi100")
